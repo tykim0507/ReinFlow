@@ -25,6 +25,7 @@
 Evaluate pre-trained/fine-tuned flow-matching policy.
 """
 import logging
+import torch
 log = logging.getLogger(__name__)
 from agent.eval.eval_agent_img_base import EvalImgAgent
 from model.flow.reflow import ReFlow
@@ -47,7 +48,7 @@ class EvalImgReFlowAgent(EvalImgAgent):
         self.model.show_inference_process = False #True # whether to print each integration step during sampling. 
         ####################################################################################
         log.info(f"Evaluation: load_ema={self.load_ema}, clip_intermediate_actions={self.clip_intermediate_actions}")
-    def infer(self, cond:dict, num_denoising_steps:int):
+    def infer(self, cond:dict, num_denoising_steps:int, extract_embeddings:bool=False):
         ################################################      overload        #########################################################
         self.model: ReFlow
         timer = Timer()
@@ -59,4 +60,21 @@ class EvalImgReFlowAgent(EvalImgAgent):
                                     )
         duration = timer()
         # samples.trajectories: (n_envs, self.horizon_steps, self.action_dim)
-        return samples, duration
+        
+        # Extract observation embeddings if requested
+        if extract_embeddings:
+            # Use the final sampled action and last time step to get embeddings
+            # We need to call network forward with output_embedding=True
+            # Use time t=1.0 (final step) and the sampled trajectories
+            B = samples.trajectories.shape[0]
+            t_final = torch.ones(B, device=self.device)
+            _, _, cond_encoded = self.model.network.forward(
+                action=samples.trajectories,
+                time=t_final,
+                cond=cond,
+                output_embedding=True
+            )
+            obs_embeddings = cond_encoded.cpu().numpy()  # (n_envs, embedding_dim)
+            return samples, duration, obs_embeddings
+        else:
+            return samples, duration

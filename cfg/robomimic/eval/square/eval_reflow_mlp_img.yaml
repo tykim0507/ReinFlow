@@ -33,7 +33,14 @@ denoising_steps: 100 # fake
 n_steps: 300  # each episode takes max_episode_steps / act_steps steps
 render_num: 0
 batch_size: 128
-denoising_step_list: [1, 2, 4, 5, 8, 16, 32, 64, 128]
+denoising_step_list: [32]
+
+# Rollout saving for fiper
+save_rollouts: true
+save_rollouts_for_steps: [32]  # Which denoising steps to save rollouts for
+save_rollouts_dir: square/rollouts  # Base directory to save rollouts (will create calibration/, test/, videos/calibration/, videos/test/ subdirectories)
+calibration_episodes_limit: 50  # Number of successful episodes to save to calibration dataset (rest go to test)
+action_pred_batch_size: 32  # Number of action predictions per state for action_pred (multiple samples from same state)
 
 env:
   n_envs: 50
