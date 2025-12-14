@@ -39,8 +39,9 @@ denoising_step_list: [32]
 save_rollouts: true
 save_rollouts_for_steps: [32]  # Which denoising steps to save rollouts for
 save_rollouts_dir: square/rollouts  # Base directory to save rollouts (will create calibration/, test/, videos/calibration/, videos/test/ subdirectories)
-calibration_episodes_limit: 50  # Number of successful episodes to save to calibration dataset (rest go to test)
+calibration_episodes_limit: 30  # Number of successful episodes to save to calibration dataset (rest go to test)
 action_pred_batch_size: 32  # Number of action predictions per state for action_pred (multiple samples from same state)
+ood_initial_state_ratio: 0.5  # Fraction of environments/episodes to use OOD initial states (0.0 to 1.0)
 
 env:
   n_envs: 50

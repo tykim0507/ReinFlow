@@ -136,6 +136,8 @@ class EvalAgent:
         self.save_rollouts_dir = cfg.get("save_rollouts_dir", "rollouts")
         self.calibration_episodes_limit = cfg.get("calibration_episodes_limit", 50)  # Number of successful episodes for calibration
         self.action_pred_batch_size = cfg.get("action_pred_batch_size", 32)  # Number of action predictions per state for action_pred
+        # OOD initial state configuration
+        self.ood_initial_state_ratio = cfg.get("ood_initial_state_ratio", 0.5)  # Fraction of environments/episodes to use OOD initial states
         if self.save_rollouts:
             # Create directory structure: rollouts/calibration/, rollouts/test/, rollouts/videos/calibration/, rollouts/videos/test/
             self.save_rollouts_calibration_dir = os.path.join(self.save_rollouts_dir, "calibration")
@@ -148,6 +150,9 @@ class EvalAgent:
             os.makedirs(self.save_videos_test_dir, exist_ok=True)
         self.episode_counter = 0
         self.calibration_episodes_count = 0  # Track number of successful episodes saved to calibration
+        # Track initial state types per environment: env_ind -> 'id' or 'ood'
+        # Each environment maintains a fixed type throughout the run
+        self.env_initial_state_types = {}
         
     
     def load_model_for_eval(self):
@@ -333,14 +338,46 @@ class EvalAgent:
         
         self.create_video_recorder(num_denoising_steps)
         
+        # Reset initial state types tracking for this run
+        self.env_initial_state_types = {}
+        
         # Check if we should save rollouts for this denoising step
         should_save_rollouts = (self.save_rollouts and 
                                num_denoising_steps in self.save_rollouts_for_steps)
         
         self.model.eval()
         firsts_trajs = np.zeros((self.n_steps + 1, self.n_envs))
-        prev_obs_venv = self.reset_env_all(options_venv=options_venv)
+        
+        # Prepare options with initial state types (ID or OOD)
+        # Determine which environments should use OOD initial states
+        if should_save_rollouts:
+            # Determine OOD environments based on ratio
+            n_ood_envs = max(1, int(self.n_envs * self.ood_initial_state_ratio))
+            ood_env_indices = np.random.choice(self.n_envs, size=n_ood_envs, replace=False).tolist()
+            
+            # Prepare options_venv with initial_state_type and OOD states
+            prepared_options_venv = []
+            for env_ind in range(self.n_envs):
+                env_options = options_venv[env_ind].copy() if env_ind < len(options_venv) else {}
+                
+                if env_ind in ood_env_indices:
+                    env_options['initial_state_type'] = 'ood'
+                else:
+                    env_options['initial_state_type'] = 'id'
+                
+                prepared_options_venv.append(env_options)
+        else:
+            prepared_options_venv = options_venv
+        
+        prev_obs_venv = self.reset_env_all(options_venv=prepared_options_venv)
         firsts_trajs[0] = 1
+        
+        # Track initial state types for each environment (fixed throughout the run)
+        if should_save_rollouts:
+            for env_ind in range(self.n_envs):
+                initial_state_type = prepared_options_venv[env_ind].get('initial_state_type', 'id')
+                self.env_initial_state_types[env_ind] = initial_state_type
+        
         reward_trajs = np.zeros((self.n_steps, self.n_envs))
         single_step_duration_list = np.zeros(self.n_steps)
         
@@ -478,7 +515,13 @@ class EvalAgent:
                     self.video_writer.write(frame)
             
             reward_trajs[step] = reward_venv
-            firsts_trajs[step + 1] = terminated_venv | truncated_venv
+            done_venv = terminated_venv | truncated_venv
+            firsts_trajs[step + 1] = done_venv
+            
+            # Note: When environments reset after being done, they maintain their fixed
+            # initial state type (ID or OOD) that was set at initialization.
+            # The wrapper remembers this type and uses it automatically.
+            
             prev_obs_venv = obs_venv
         
         if self.video_writer is not None:
@@ -684,7 +727,10 @@ class EvalAgent:
                 video_save_dir = self.save_videos_calibration_dir
             else:
                 rollout_type = 'test'
-                rollout_subtype = 'id' if is_successful else 'ood'  # In-distribution or out-of-distribution
+                # Get initial state type for this environment (ID or OOD)
+                # Each environment maintains a fixed type throughout the run
+                initial_state_type = self.env_initial_state_types.get(env_ind, 'id')
+                rollout_subtype = initial_state_type  # 'id' or 'ood' based on initial state distribution
                 save_dir = self.save_rollouts_test_dir
                 video_save_dir = self.save_videos_test_dir
             

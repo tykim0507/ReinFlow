@@ -62,6 +62,7 @@ class RobomimicImageWrapper(gym.Env):
         self.render_camera_name = render_camera_name
         self.video_writer = None
         self.clamp_obs = clamp_obs
+        self.initial_state_type = None  # Store the initial state type (ID or OOD) for this environment
 
         # set up normalization
         self.normalize = normalization_path is not None
@@ -155,6 +156,18 @@ class RobomimicImageWrapper(gym.Env):
         new_seed = options.get(
             "seed", None
         )  # used to set all environments to specified seeds
+        # Get initial_state_type from options, or use stored type, or default to "id"
+        initial_state_type = options.get("initial_state_type", None)
+        if initial_state_type is not None:
+            # Store the type if provided (typically during first reset)
+            self.initial_state_type = initial_state_type
+        elif self.initial_state_type is not None:
+            # Use stored type if available
+            initial_state_type = self.initial_state_type
+        else:
+            # Default to "id" if never set
+            initial_state_type = "id"
+        
         if self.init_state is not None:
             if not self.has_reset_before:
                 # the env must be fully reset at least once to ensure correct rendering
@@ -163,11 +176,20 @@ class RobomimicImageWrapper(gym.Env):
 
             # always reset to the same state to be compatible with gym
             raw_obs = self.env.reset_to({"states": self.init_state})
+        elif initial_state_type == "ood":
+            #HACK: hardcode the OOD state for now
+            print(f"changing x_range from {self.env.env.placement_initializer.samplers['SquareNutSampler'].x_range} to [-0.11, -0.105]")
+            # print(f"changing y_range from {self.env.env.placement_initializer.samplers['SquareNutSampler'].y_range} to [0.09, 0.11]")
+            sampler = self.env.env.placement_initializer.samplers['SquareNutSampler']
+            sampler.x_range = [-0.11, -0.105]
+            # sampler.y_range = [0.09, 0.11]
+            
+            raw_obs = self.env.reset()
         elif new_seed is not None:
             self.seed(seed=new_seed)
             raw_obs = self.env.reset()
         else:
-            # random reset
+            # random reset (default ID behavior)
             raw_obs = self.env.reset()
         return self.get_observation(raw_obs)
 
